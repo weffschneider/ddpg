@@ -11,8 +11,9 @@ Author: Patrick Emami
 """
 import tensorflow as tf
 import numpy as np
-import gym
+# import gym
 from gym import wrappers
+from envs.grasp import *
 import tflearn
 import argparse
 import pprint as pp
@@ -278,7 +279,7 @@ def train(sess, env, args, actor, critic, actor_noise):
         ep_reward = 0
         ep_ave_max_q = 0
 
-        for j in range(int(args['max_episode_len'])):
+        for j in range(1,int(args['max_episode_len'])):
 
             if args['render_env']:
                 env.render()
@@ -345,7 +346,7 @@ def main(args):
 
     with tf.Session() as sess:
 
-        env = gym.make(args['env'])
+        env = GraspEnv() # gym.make(args['env'])
         np.random.seed(int(args['random_seed']))
         tf.set_random_seed(int(args['random_seed']))
         env.seed(int(args['random_seed']))
@@ -354,7 +355,7 @@ def main(args):
         action_dim = env.action_space.shape[0]
         action_bound = env.action_space.high
         # Ensure action bound is symmetric
-        assert (env.action_space.high == -env.action_space.low)
+        # assert (env.action_space.high == -env.action_space.low)
 
         actor = ActorNetwork(sess, state_dim, action_dim, action_bound,
                              float(args['actor_lr']), float(args['tau']),
@@ -393,7 +394,7 @@ if __name__ == '__main__':
     # run parameters
     parser.add_argument('--env', help='choose the gym env- tested on {Pendulum-v0}', default='Pendulum-v0')
     parser.add_argument('--random-seed', help='random seed for repeatability', default=1234)
-    parser.add_argument('--max-episodes', help='max num of episodes to do while training', default=50000)
+    parser.add_argument('--max-episodes', help='max num of episodes to do while training', default=500)#000)
     parser.add_argument('--max-episode-len', help='max length of 1 episode', default=1000)
     parser.add_argument('--render-env', help='render the gym env', action='store_true')
     parser.add_argument('--use-gym-monitor', help='record gym results', action='store_true')
@@ -401,7 +402,7 @@ if __name__ == '__main__':
     parser.add_argument('--summary-dir', help='directory for storing tensorboard info', default='./results/tf_ddpg')
 
     parser.set_defaults(render_env=False)
-    parser.set_defaults(use_gym_monitor=True)
+    parser.set_defaults(use_gym_monitor=False) #True)
     
     args = vars(parser.parse_args())
     
