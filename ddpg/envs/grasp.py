@@ -13,13 +13,6 @@ import scipy
 from scipy.integrate import odeint
 import matplotlib.pyplot as plt
 
-def exp_barrier(x, alpha=1., d=0):
-    if d == 0:
-        return alpha**2*(np.exp(x/alpha) - 0.5*(x/alpha)**2 - (x/alpha) - 1)*(x>0)
-    elif d == 1:
-        return alpha*(np.exp(x/alpha) - (x/alpha) - 1)*(x>0)
-    elif d == 2:
-        return (np.exp(x) - 1)*(x>0)
 
 def soft_abs(x, alpha=1.0, d=0):
     z = np.sqrt(alpha**2 + x**2)
@@ -29,31 +22,6 @@ def soft_abs(x, alpha=1.0, d=0):
         return x/z
     if d == 2:
         return alpha**2 / z**3
-    
-def soft_plus(x, alpha=1.0, d=0):
-    f = alpha * np.log(1 + np.exp(x/alpha))
-    if d == 0:
-        return f
-    df = np.exp(x/alpha) / (1 + np.exp(x/alpha))
-    if d == 1:
-        return df
-    if d == 2:
-        return 1/alpha * df * ( 1 - df)
-    
-def barrier_func(x, alpha=1.0, d=0):
-    if d == 0:
-        return alpha**2*(np.cosh(x / alpha) - 1)
-    if d == 1:
-        return alpha*(np.sinh(x/alpha))
-    if d == 2:
-        return np.cosh(x/alpha)
-
-def hat(x):
-    """Forms a vector into the cross-product (AKA hat) matrix."""
-    x1,x2,x3 = x
-    return np.array([[0, -x3, x2],
-                     [x3, 0, -x1],
-                     [-x2, x1, 0]])
     
 def vector_cross(x,y):
     """
@@ -125,10 +93,7 @@ class GraspEnv(gym.Env):
         
         self.panel2_len_nom = 5.
         self.panel2_angle_nom = 3.*math.pi/2.
-        
-        self.decay_scale_factor_lower = 0.1
-        self.decay_scale_factor_upper = 0.5
-        
+                
         # State + action bounds
         # state: xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho
         self.x_upper = 40.
@@ -144,36 +109,29 @@ class GraspEnv(gym.Env):
         self.f_lower = 0.
         self.M_lim = 0.075              # Rockwell Collins RSI 4-75
         
-        self.sr2inv = 1./np.sqrt(2)
-        
-        # TODO process noise sigma
-
-        # TODO ----- Cost terms
         # -- simple cost terms
-        self.simple_x_cost = 1.
-        self.simple_y_cost = 1.
-        self.simple_f1_cost = 0.1
-        self.simple_f2_cost = 0.1
+        self.simple_x_cost = 0.1
+        self.simple_y_cost = 0.1
+        self.simple_f1_cost = 0.5
+        self.simple_f2_cost = 0.5
         self.simple_m_cost = 0.5
-        
-        self.f_barrier_offset = 0.01
-        self.m_barrier_offset = 70.
-        self.f_barrier_alpha = 1.
-        self.m_barrier_alpha = 0.02
         # --
-        
-        self.weight_control = 1.
-        self.weight_goal = 1.
-        self.weight_saturation = 1.
+
+        # I think this is from CM-gripper to CM-object
+        self.offset_distance = self.rs + self.ro + self.Ls + self.Lo
 
         # define initial state
-        self.offset_distance = self.rs + self.ro + self.Ls + self.Lo # what is L?
+        # TODO: usually use randomized initial state, but should this be more interesting anyway?
         self.start_state = np.zeros(self.s_dim)
         self.start_state[0] = -5.
-        # object starts at offset_distance from spacecraft
-        self.start_state[6] = self.start_state[0] + self.offset_distance
+        self.start_state[6] = 5.
 
         # define goal region
+        # TODO: this should use the force limit surface from ICRA paper
+        # if (outside of gripper range)
+        #     nope
+        # if (inside gripper range, close enough to gripper)
+        #     limit surface
         self.goal_state = np.zeros(self.s_dim)
         self.goal_eps_r = 0.5
         
@@ -220,8 +178,8 @@ class GraspEnv(gym.Env):
                                 -self.f_upper,
                                 -self.M_lim])
 
-        self.action_space = spaces.Box(low=low_actions,high=high_actions, dtype=np.float32)
-        self.state_space = spaces.Box(low=low_state, high=high_state, dtype=np.float32)
+        self.action_space = spaces.Box(low=low_actions, high=high_actions)
+        self.state_space = spaces.Box(low=low_state, high=high_state)
         self.observation_space = self.state_space #spaces.Box(low=low_obsv, high=high_obsv)
 
         self.seed(2017)
@@ -236,20 +194,27 @@ class GraspEnv(gym.Env):
     def get_ob_sample(self):
         #currently setting random state, not doing trajs
         z = self.observation_space.sample()
-        z[0] = np.random.uniform(-10,10)
-        z[1] = np.random.uniform(-10,10)
+        # ********************** TODO ***********************
+        # right now this trains a lopsided NN, since the spacecraft always starts in the same
+        # direciton relative to the object. just did this for now to keep them from starting
+        # on top of each other
+        z[0] = np.random.uniform(-10,-2)
+        z[1] = np.random.uniform(-10,-2)
         z[2] = np.random.randn()
         z[3] = np.random.uniform(-0.5,0.5)
         z[4] = np.random.uniform(-0.5,0.5)
         z[5] = np.random.uniform(-0.1,0.1)
         
         noise_ampl = 0.2
-        z[6] = z[0] + np.cos(z[2]) * self.offset_distance + np.random.randn() * noise_ampl #xo
-        z[7] = z[1] + np.sin(z[2]) * self.offset_distance + np.random.randn() * noise_ampl #yo
-        z[8] = z[2] + np.random.randn() * noise_ampl #tho
-        z[9] = z[3] - np.sin(z[2]) * z[5] * self.offset_distance + np.random.randn() * noise_ampl #vxo
-        z[10] = z[4] + np.cos(z[2]) * z[5] * self.offset_distance + np.random.randn() * noise_ampl #vyo
-        z[11] =  z[5] + np.random.randn() * noise_ampl #vtho
+        z[6] = np.random.uniform(2,10)
+        z[7] = np.random.uniform(2,10)
+        z[8] = np.random.randn()
+        z[9] = np.random.uniform(-0.5,0.5)
+        z[10] = np.random.uniform(-0.5,0.5)
+        z[11] = np.random.uniform(-0.1,0.1)
+
+        # if (z[0], z[1]) is close to (z[6], z[7])
+        #      move the object somewhere else
         
         return z
 
@@ -278,6 +243,7 @@ class GraspEnv(gym.Env):
 
     
     def _goal_dist(self, state):
+        # TODO: change this
         return soft_abs(state[0]-self.goal_state[0],1.0) 
         + soft_abs(state[1]-self.goal_state[1],1.0)
         + soft_abs(np.sin(state[2])-np.sin(self.goal_state[2]),1.0)
@@ -293,13 +259,16 @@ class GraspEnv(gym.Env):
         
         x_pen = self.simple_x_cost * soft_abs(xo - self.goal_state[6])
         y_pen = self.simple_y_cost * soft_abs(yo - self.goal_state[7])
-        th_pen = self.simple_m_cost * soft_abs(tho - self.goal_state[8])
+
+        f1_pen = self.simple_f1_cost * soft_abs(f1)
+        f2_pen = self.simple_f2_cost * soft_abs(f2)
+        m_pen = self.simple_m_cost * soft_abs(m)
         
-        return x_pen + y_pen + th_pen
+        return x_pen + y_pen + f1_pen + f2_pen + m_pen
     
     def x_dot(self,z,u):
         xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = z
-        fxs, fys, m = u
+        fxs, fys, m = u # specific accel (per unit mass)
         
         # velocity terms
         xs_d = vxs
@@ -311,76 +280,13 @@ class GraspEnv(gym.Env):
         tho_d = vtho
         
         # acceleration terms
-        
-        # computing the link points of each body, for spring force calc
-        # also computing the velocities, for damping
-        
-        # these are in global frame
-        # TODO double check the signs on these rotations
-        x_conn_s = xs + np.cos(ths) * (self.rs + self.Ls)
-        y_conn_s = ys + np.sin(ths) * (self.rs + self.Ls)
-        
-        vx_conn_s = vxs - np.sin(ths) * (self.rs + self.Ls) * (vths)
-        vy_conn_s = vys + np.cos(ths) * (self.rs + self.Ls) * (vths)
-        
-        x_conn_o = xo + np.cos(tho) * (-1) * (self.ro + self.Lo)
-        y_conn_o = yo + np.sin(tho) * (-1) * (self.ro + self.Lo)
-        
-        vx_conn_o = vxo - np.sin(tho) * (-1) * (self.ro + self.Lo) * (vtho)
-        vy_conn_o = vyo + np.cos(tho) * (-1) * (self.ro + self.Lo) * (vtho)
-        
-        x_diff = x_conn_s - x_conn_o
-        y_diff = y_conn_s - y_conn_o
-        
-        vx_diff = vx_conn_s - vx_conn_o
-        vy_diff = vy_conn_s - vy_conn_o
-        
-        # map displacement and vel diff to local frame of spacecraft for spring calcs
-        x_diff_localref = np.cos(ths) * x_diff + np.sin(ths) * y_diff
-        y_diff_localref = - np.sin(ths) * x_diff + np.cos(ths) * y_diff
+        vxs_d = fxs
+        vys_d = fys
+        vths_d = m
 
-        vx_diff_localref = np.cos(ths) * x_diff + np.sin(ths) * y_diff
-        vy_diff_localref = - np.sin(ths) * x_diff + np.cos(ths) * y_diff
-        
-        # compute forces in local frame, then map back
-        # spring force applied to spacecraft in spacecraft frame
-        fkx_localref = -self.kx * x_diff_localref
-        fky_localref = -self.ky * y_diff_localref
-        
-        # rotate back to global ref frame
-        # TODO move these mappings to a function with forward/backward args
-        fkx = np.cos(ths) * fkx_localref - np.sin(ths) * fky_localref
-        fky = np.sin(ths) * fkx_localref + np.cos(ths) * fky_localref
-        
-        mk = - self.kth * norm_angle(ths - tho) #torsional spring
-        
-        # damping
-        fdx_localref = -self.dx * vx_diff_localref
-        fdy_localref = -self.dy * vy_diff_localref
-
-        # rotate back to global ref frame
-        fdx = np.cos(ths) * fdx_localref - np.sin(ths) * fdy_localref
-        fdy = np.sin(ths) * fdx_localref + np.cos(ths) * fdy_localref
-        
-        md = - self.dth * (vths - vtho) #torsional damping
-        
-        #spring torque on spacecraft
-        ms = (fdy_localref + fky_localref) * (self.Ls + self.rs)
-        
-        #spring torque on object
-        mo = (self.Lo + self.ro) * (np.cos(tho) * (fky + fdy) - np.sin(tho) * (fkx + fdx))
-        
-        sr2inv = self.sr2inv
-        
-        # should use standardized rotation function for this transform
-        vxs_d = fxs + fkx + fdx
-        vys_d = fys + fky + fdy
-        vths_d = m + ms + mk + md
-
-        # TODO: add in functionality for post-grasp
-        vxo_d  = - fkx - fdx
-        vyo_d  = - fky - fdy
-        vtho_d = mo - mk - md
+        vxo_d  = 0
+        vyo_d  = 0
+        vtho_d = 0
         
         return [xs_d, ys_d, ths_d, vxs_d, vys_d, vths_d, 
                 xo_d, yo_d, tho_d, vxo_d, vyo_d, vtho_d]
@@ -407,17 +313,14 @@ class GraspEnv(gym.Env):
     
     def step(self, action):
         # state: x,y,z, vx,vy,vz, phi,th,psi, phid, thd, psid,
-        # r, rd, beta, gamma, betad, gammad
-        # control: f, M
+         # r, rd, beta, gamma, betad, gammad
+        # control: f1, f2, M
         
         old_state = self.state.copy()
         
         self.state = self.forward_dynamics(old_state,action)
         
-        # TODO add process noise
-        
-        costfun = self.simple_cost
-        reward = -1* costfun(old_state,action)
+        reward = -1* self.simple_cost(old_state,action)
         
         done = False
         if self._goal_dist(old_state) <= self.goal_eps_r:
@@ -436,8 +339,6 @@ class GraspEnv(gym.Env):
             
         self.mo = self.mo_nom
         self.Jo = self.Jo_nom
-        
-        self.decay_scale_factor = self.decay_scale_factor_lower
         
         if self.rand_init:
             self.state = self.get_ob_sample()
@@ -474,10 +375,10 @@ class GraspEnv(gym.Env):
           xs = np.linspace(0,scale*self.Ls,100)
           ys = np.zeros(xs.shape)
           xys = list(zip(xs,ys))
-          l1 = rendering.make_polyline(xys)
+          l1 = rendering.make_polyline(xys) # draw a straight line
           l1.set_color(1.,0.,0.)
           l1.set_linewidth(3)
-          self.l1trans = rendering.Transform()
+          self.l1trans = rendering.Transform() # create transform object for that line
           l1.add_attr(self.l1trans)
           self.viewer.add_geom(l1)
 
