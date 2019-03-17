@@ -96,32 +96,31 @@ class GraspEnv(gym.Env):
                 
         # State + action bounds
         # state: xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho
-        self.x_upper = 40.
-        self.x_lower = -40.
+        self.x_upper = 10.
+        self.x_lower = -10.
         self.y_upper = self.x_upper
         self.y_lower = self.x_lower
         
-        self.v_limit = 5. #vel limit for all directions
-        self.angle_limit = 4.
-        self.angle_deriv_limit = 2.
+        self.v_limit = 0.5 #vel limit for all directions
+        self.angle_limit = math.pi/4.
+        self.angle_deriv_limit = math.pi/16.
         
         self.f_upper = 5.               # Aerojet Rocketdyne MR-111
         self.f_lower = 0.
         self.M_lim = 0.075              # Rockwell Collins RSI 4-75
         
         # -- simple cost terms
-        self.simple_x_cost = 0.1
-        self.simple_y_cost = 0.1
-        self.simple_f1_cost = 0.5
-        self.simple_f2_cost = 0.5
-        self.simple_m_cost = 0.5
+        self.simple_dist_cost = 0.2
+        self.simple_angle_cost = 0.1
+        self.simple_f1_cost = 0.1
+        self.simple_f2_cost = 0.1
+        self.simple_m_cost = 0.1
         # --
 
         # I think this is from CM-gripper to CM-object
         self.offset_distance = self.rs + self.ro + self.Ls + self.Lo
 
-        # define initial state
-        # TODO: usually use randomized initial state, but should this be more interesting anyway?
+        # define default initial state (note: not used if rand_init=True)
         self.start_state = np.zeros(self.s_dim)
         self.start_state[0] = -5.
         self.start_state[6] = 5.
