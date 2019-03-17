@@ -131,10 +131,10 @@ class GraspEnv(gym.Env):
         #     nope
         # if (inside gripper range, close enough to gripper)
         #     limit surface
-        self.goal_state = np.zeros(self.s_dim)
-        self.goal_eps_r = 0.5
+        self.goal_eps_norm = 0.2
+        self.goal_eps_tan = 0.5
+        self.goal_eps_ang = math.pi
         
-        # TODO define spaces
         high_ob = [self.x_upper,
                    self.y_upper,
                    self.angle_limit,
@@ -191,29 +191,13 @@ class GraspEnv(gym.Env):
         return [thrust1,thrust2,m]
     
     def get_ob_sample(self):
-        #currently setting random state, not doing trajs
-        z = self.observation_space.sample()
-        # ********************** TODO ***********************
-        # right now this trains a lopsided NN, since the spacecraft always starts in the same
-        # direciton relative to the object. just did this for now to keep them from starting
-        # on top of each other
-        z[0] = np.random.uniform(-10,-2)
-        z[1] = np.random.uniform(-10,-2)
-        z[2] = np.random.randn()
-        z[3] = np.random.uniform(-0.5,0.5)
-        z[4] = np.random.uniform(-0.5,0.5)
-        z[5] = np.random.uniform(-0.1,0.1)
-        
-        noise_ampl = 0.2
-        z[6] = np.random.uniform(2,10)
-        z[7] = np.random.uniform(2,10)
-        z[8] = np.random.randn()
-        z[9] = np.random.uniform(-0.5,0.5)
-        z[10] = np.random.uniform(-0.5,0.5)
-        z[11] = np.random.uniform(-0.1,0.1)
+        # currently setting random state, not doing trajs
+        z = self.state_space.sample()
 
-        # if (z[0], z[1]) is close to (z[6], z[7])
-        #      move the object somewhere else
+        # keep moving object until they're not on top of each other
+        while np.sqrt((z[6]-z[0])**2 + (z[7]-z[1])**2) < 1.2*(self.ro+self.rs):
+            z[6] = np.random.uniform(self.x_lower, self.x_upper)
+            z[7] = np.random.uniform(self.y_lower, self.y_upper)
         
         return z
 
@@ -242,28 +226,34 @@ class GraspEnv(gym.Env):
 
     
     def _goal_dist(self, state):
-        # TODO: change this
-        return soft_abs(state[0]-self.goal_state[0],1.0) 
-        + soft_abs(state[1]-self.goal_state[1],1.0)
-        + soft_abs(np.sin(state[2])-np.sin(self.goal_state[2]),1.0)
-        + soft_abs(np.cos(state[2])-np.cos(self.goal_state[2]),1.0)
-        + soft_abs(state[6]-self.goal_state[6],1.0) 
-        + soft_abs(state[7]-self.goal_state[7],1.0)
-        + soft_abs(np.sin(state[8])-np.sin(self.goal_state[8]),1.0)
-        + soft_abs(np.cos(state[8])-np.cos(self.goal_state[8]),1.0)
+        xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = state
+        s2o = np.array([xo-xs,yo-ys]);
+        xs_hat = np.array([[np.cos(ths)],[np.sin(ths)]])
+        ys_hat = np.array([[-np.sin(ths)],[np.cos(ths)]])
+        norm_dist_to_object = soft_abs(np.dot(s2o,xs_hat) - (self.ro+self.rs), 1.0)
+        tan_dist_to_object = soft_abs(np.dot(s2o,ys_hat), 1.0)
+        angle_to_gripper = soft_abs(ths - np.arctan2(yo-ys,xo-xs), 1.0)
+
+        # TODO: add distance for force limit surface
+        return (norm_dist_to_object, tan_dist_to_object, angle_to_gripper)
 
     def simple_cost(self,s,a):
         xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = s
         f1, f2, m = a
         
-        x_pen = self.simple_x_cost * soft_abs(xo - self.goal_state[6])
-        y_pen = self.simple_y_cost * soft_abs(yo - self.goal_state[7])
+        dist_to_object = np.sqrt((xo-xs)**2 + (yo-ys)**2)
+        dist_pen = self.simple_dist_cost * soft_abs(dist_to_object)
+
+        angle_to_gripper = soft_abs(ths - np.arctan2(yo-ys,xo-xs), 1.0)
+        ang_pen = self.simple_angle_cost * angle_to_gripper
 
         f1_pen = self.simple_f1_cost * soft_abs(f1)
         f2_pen = self.simple_f2_cost * soft_abs(f2)
         m_pen = self.simple_m_cost * soft_abs(m)
+
+        # TODO: add cost for being at the goal position but going too fast...
         
-        return x_pen + y_pen + f1_pen + f2_pen + m_pen
+        return dist_pen + ang_pen + f1_pen + f2_pen + m_pen
     
     def x_dot(self,z,u):
         xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = z
@@ -322,7 +312,10 @@ class GraspEnv(gym.Env):
         reward = -1* self.simple_cost(old_state,action)
         
         done = False
-        if self._goal_dist(old_state) <= self.goal_eps_r:
+        norm_dist, tan_dist, angle = self._goal_dist(old_state)
+        if (norm_dist <= self.goal_eps_norm and
+            tan_dist  <= self.goal_eps_tan and
+            angle     <= self.goal_eps_ang):
             done = True
             reward += 100.
 
@@ -352,8 +345,8 @@ class GraspEnv(gym.Env):
         # uniform width/height for window for now
         screen_width, screen_height = 600,600 
 
-        scale_x = screen_width/(self.x_upper-self.x_lower)
-        scale_y = screen_height/(self.y_upper-self.y_lower)
+        scale_x = screen_width/(4*(self.x_upper-self.x_lower))
+        scale_y = screen_height/(4*(self.y_upper-self.y_lower))
         scale = 3*scale_x
         if scale_x != scale_y:
           scale = np.min((scale_x,scale_y))
@@ -422,18 +415,22 @@ class GraspEnv(gym.Env):
           self.viewer.add_geom(p2)
 
         # Calculate poses for geometries
-        xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = self.state 
+        xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = self.state
+
+        # velocity direction
+        ths_vel = np.arctan2(vys, vxs)
+        tho_vel = np.arctan2(vyo, vxo)
 
         # NOTE: x_conn_s&y_conn_s definitions are NOT same as defined above
-        x_conn_s = xs + np.cos(ths) * self.rs
-        y_conn_s = ys + np.sin(ths) * self.rs
-        x_conn_o = xo - np.cos(tho) * (self.ro + self.Lo) 
-        y_conn_o = yo - np.sin(tho) * (self.ro + self.Lo)
+        x_conn_s = xs + np.cos(ths_vel) * self.rs
+        y_conn_s = ys + np.sin(ths_vel) * self.rs
+        x_conn_o = xo + np.cos(tho_vel) * self.ro 
+        y_conn_o = yo + np.sin(tho_vel) * self.ro
 
-        xp1 = xo - np.cos(tho+self.panel1_angle)*(self.ro+self.panel1_len)
-        yp1 = yo - np.sin(tho+self.panel1_angle)*(self.ro+self.panel1_len)
-        xp2 = xo - np.cos(tho+self.panel2_angle)*(self.ro+self.panel2_len)
-        yp2 = yo - np.sin(tho+self.panel2_angle)*(self.ro+self.panel2_len)
+        xp1 = xs - np.cos(ths+self.panel1_angle)*(self.rs+self.panel1_len)
+        yp1 = ys - np.sin(ths+self.panel1_angle)*(self.rs+self.panel1_len)
+        xp2 = xs - np.cos(ths+self.panel2_angle)*(self.rs+self.panel2_len)
+        yp2 = ys - np.sin(ths+self.panel2_angle)*(self.rs+self.panel2_len)
 
         # Update poses for geometries
         self.basetrans.set_translation(
@@ -444,12 +441,13 @@ class GraspEnv(gym.Env):
         self.l1trans.set_translation(
                     screen_width/2+scale*x_conn_s,
                     screen_height/2+scale*y_conn_s)
-        self.l1trans.set_rotation(ths)
+        # pointing along spacecraft velocity
+        self.l1trans.set_rotation(ths_vel)
 
         self.l2trans.set_translation(
                     screen_width/2+scale*x_conn_o,
                     screen_height/2+scale*y_conn_o)
-        self.l2trans.set_rotation(tho)
+        self.l2trans.set_rotation(tho_vel)
 
         self.objtrans.set_translation(
                     screen_width/2+scale*xo,
@@ -459,11 +457,11 @@ class GraspEnv(gym.Env):
         self.p1trans.set_translation(
                     screen_width/2+scale*xp1,
                     screen_height/2+scale*yp1)
-        self.p1trans.set_rotation(tho+self.panel1_angle)
+        self.p1trans.set_rotation(ths+self.panel1_angle)
 
         self.p2trans.set_translation(
                     screen_width/2+scale*xp2,
                     screen_height/2+scale*yp2)
-        self.p2trans.set_rotation(tho+self.panel2_angle)
+        self.p2trans.set_rotation(ths+self.panel2_angle)
 
         return self.viewer.render(return_rgb_array = mode=='rgb_array')
