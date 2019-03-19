@@ -239,9 +239,20 @@ class OrnsteinUhlenbeckActionNoise:
 
 def build_summaries():
     episode_reward = tf.Variable(0.)
-    tf.summary.scalar("Reward", episode_reward)
+    tf.summary.scalar("Train Reward", episode_reward)
     episode_ave_max_q = tf.Variable(0.)
-    tf.summary.scalar("Qmax Value", episode_ave_max_q)
+    tf.summary.scalar("Train Qmax Value", episode_ave_max_q)
+
+    summary_vars = [episode_reward, episode_ave_max_q]
+    summary_ops = tf.summary.merge_all()
+
+    return summary_ops, summary_vars
+
+def build_scores():
+    episode_reward = tf.Variable(0.)
+    tf.summary.scalar("Test Reward", episode_reward)
+    episode_ave_max_q = tf.Variable(0.)
+    tf.summary.scalar("Test Qmax Value", episode_ave_max_q)
 
     summary_vars = [episode_reward, episode_ave_max_q]
     summary_ops = tf.summary.merge_all()
@@ -267,6 +278,7 @@ def train(sess, env, args, actor, critic, actor_noise):
     # Initialize replay memory
     replay_buffer = ReplayBuffer(int(args['buffer_size']), int(args['random_seed']))
 
+    # ********************** do this???? *********************
     # Needed to enable BatchNorm. 
     # This hurts the performance on Pendulum but could be useful
     # in other environments.
@@ -338,9 +350,54 @@ def train(sess, env, args, actor, critic, actor_noise):
                 writer.add_summary(summary_str, i)
                 writer.flush()
 
-                print('| Reward: {:d} | Episode: {:d} | Qmax: {:.4f}'.format(int(ep_reward), \
+                print('TRAIN | Reward: {:d} | Episode: {:d} | Qmax: {:.4f}'.format(int(ep_reward), \
                         i, (ep_ave_max_q / float(j))))
                 break
+
+def test(sess, env, args, actor):
+
+    # Set up summary Ops
+    test_ops, test_vars = build_scores()
+
+    # sess.run(tf.global_variables_initializer()) # do we want to initialize?
+    writer = tf.summary.FileWriter(args['test_dir'], sess.graph)
+
+    success = 0
+
+    for i in range(int(args['test_episodes'])):
+
+        s = env.reset()
+
+        ep_reward = 0
+        ep_ave_max_q = 0
+
+        for j in range(1,int(args['max_episode_len'])):
+
+            if args['render_test']:
+                env.render()
+
+            a = actor.predict(np.reshape(s, (1, actor.s_dim)))
+            s, r, terminal, info = env.step(a[0])
+
+            ep_reward += r
+
+            if terminal:
+
+                test_str = sess.run(test_ops, feed_dict={
+                    test_vars[0]: ep_reward,
+                    test_vars[1]: ep_ave_max_q / float(j)
+                })
+
+                writer.add_summary(test_str, i)
+                writer.flush()
+
+                success += 1
+
+                break
+
+        print('TEST | Reward: {:d} | Episode: {:d} '.format(int(ep_reward), i))
+
+    print('Success rate: {:f}'.format(success/float(args['test_episodes'])))
 
 def main(args):
 
@@ -377,6 +434,10 @@ def main(args):
 
         train(sess, env, args, actor, critic, actor_noise)
 
+        print('~~~~~~~~~~ training is over ~~~~~~~~~~')
+
+        test(sess, env, args, actor)
+
         if args['use_gym_monitor']:
             env.monitor.close()
 
@@ -388,20 +449,24 @@ if __name__ == '__main__':
     parser.add_argument('--critic-lr', help='critic network learning rate', default=0.001)
     parser.add_argument('--gamma', help='discount factor for critic updates', default=0.99)
     parser.add_argument('--tau', help='soft target update parameter', default=0.001)
-    parser.add_argument('--buffer-size', help='max size of the replay buffer', default=1000000)
+    parser.add_argument('--buffer-size', help='max size of the replay buffer', default=100000)
     parser.add_argument('--minibatch-size', help='size of minibatch for minibatch-SGD', default=64)
 
     # run parameters
     parser.add_argument('--env', help='choose the gym env- tested on {Pendulum-v0}', default='Pendulum-v0')
     parser.add_argument('--random-seed', help='random seed for repeatability', default=1234)
-    parser.add_argument('--max-episodes', help='max num of episodes to do while training', default=500)#000)
-    parser.add_argument('--max-episode-len', help='max length of 1 episode', default=100)
+    parser.add_argument('--max-episodes', help='max num of episodes to do while training', default=5000)
+    parser.add_argument('--test-episodes', help='num episodes while testing', default = 100)
+    parser.add_argument('--max-episode-len', help='max length of 1 episode', default=200)
     parser.add_argument('--render-env', help='render the gym env', action='store_true')
+    parser.add_argument('--render-test', help='render the gym env for test only', action='store_true')
     parser.add_argument('--use-gym-monitor', help='record gym results', action='store_true')
     parser.add_argument('--monitor-dir', help='directory for storing gym results', default='./results/gym_ddpg')
-    parser.add_argument('--summary-dir', help='directory for storing tensorboard info', default='./results/tf_ddpg')
+    parser.add_argument('--summary-dir', help='directory for storing tensorboard info', default='./results/tf_ddpg_train')
+    parser.add_argument('--test-dir', help='directory for storing test info', default='./results/tf_ddpg_test')
 
     parser.set_defaults(render_env=False)
+    parser.set_defaults(render_test=True)
     parser.set_defaults(use_gym_monitor=False) #True)
     
     args = vars(parser.parse_args())
