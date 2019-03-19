@@ -11,7 +11,6 @@ from gym.utils import seeding
 import numpy as np
 import scipy
 from scipy.integrate import odeint
-import matplotlib.pyplot as plt
 
 
 def soft_abs(x, alpha=1.0, d=0):
@@ -110,11 +109,11 @@ class GraspEnv(gym.Env):
         self.M_lim = 0.075              # Rockwell Collins RSI 4-75
         
         # -- simple cost terms
-        self.simple_dist_cost = 0.2
+        self.simple_dist_cost = 0.1
         self.simple_angle_cost = 0.1
-        self.simple_f1_cost = 0.1
-        self.simple_f2_cost = 0.1
-        self.simple_m_cost = 0.1
+        self.simple_f1_cost = 0.5
+        self.simple_f2_cost = 0.5
+        self.simple_m_cost = 0.5
         # --
 
         # I think this is from CM-gripper to CM-object
@@ -131,8 +130,8 @@ class GraspEnv(gym.Env):
         #     nope
         # if (inside gripper range, close enough to gripper)
         #     limit surface
-        self.goal_eps_norm = 0.2
-        self.goal_eps_tan = 0.5
+        self.goal_eps_norm = 0.5
+        self.goal_eps_tan = 1.0
         self.goal_eps_ang = math.pi
         
         high_ob = [self.x_upper,
@@ -194,10 +193,26 @@ class GraspEnv(gym.Env):
         # currently setting random state, not doing trajs
         z = self.state_space.sample()
 
-        # keep moving object until they're not on top of each other
-        while np.sqrt((z[6]-z[0])**2 + (z[7]-z[1])**2) < 1.2*(self.ro+self.rs):
-            z[6] = np.random.uniform(self.x_lower, self.x_upper)
-            z[7] = np.random.uniform(self.y_lower, self.y_upper)
+        # train always in the same-ish direction
+        z[0] = np.random.uniform(-5, -2)
+        z[1] = np.random.uniform(-5, -2)
+        z[2] = np.random.uniform(-math.pi, math.pi)
+        # start at zero velocity
+        z[3] = 0 #np.random.uniform(-0.1,0.1)
+        z[4] = 0 #np.random.uniform(-0.1,0.1)
+        z[5] = 0
+
+        z[6] = np.random.uniform(2,5)
+        z[7] = np.random.uniform(2,5)
+        z[8] = 0
+        z[9] = np.random.uniform(-0.1,0.1)
+        z[10] = np.random.uniform(-0.1,0.1)
+        z[11] = 0 #np.random.uniform(-0.1,0.1)
+
+        # # keep moving object until they're not on top of each other
+        # while np.sqrt((z[6]-z[0])**2 + (z[7]-z[1])**2) < 1.2*(self.ro+self.rs):
+        #     z[6] = np.random.uniform(self.x_lower, self.x_upper)
+        #     z[7] = np.random.uniform(self.y_lower, self.y_upper)
         
         return z
 
@@ -234,7 +249,7 @@ class GraspEnv(gym.Env):
         tan_dist_to_object = soft_abs(np.dot(s2o,ys_hat), 1.0)
         angle_to_gripper = soft_abs(ths - np.arctan2(yo-ys,xo-xs), 1.0)
 
-        # TODO: add distance for force limit surface
+        # TODO: add distance for force limit surface (e.g. velocity limits)
         return (norm_dist_to_object, tan_dist_to_object, angle_to_gripper)
 
     def simple_cost(self,s,a):
@@ -313,9 +328,9 @@ class GraspEnv(gym.Env):
         
         done = False
         norm_dist, tan_dist, angle = self._goal_dist(old_state)
-        if (norm_dist <= self.goal_eps_norm and
-            tan_dist  <= self.goal_eps_tan and
-            angle     <= self.goal_eps_ang):
+        if (soft_abs(norm_dist) <= self.goal_eps_norm and
+            soft_abs(tan_dist)  <= self.goal_eps_tan):# and
+            #angle     <= self.goal_eps_ang):
             done = True
             reward += 100.
 
