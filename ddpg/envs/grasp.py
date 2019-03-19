@@ -88,10 +88,10 @@ class GraspEnv(gym.Env):
 
         # Randomization limits
         self.panel1_len_nom = 5.
-        self.panel1_angle_nom = math.pi/2.
+        self.panel1_angle_nom = math.pi/3.
         
         self.panel2_len_nom = 5.
-        self.panel2_angle_nom = 3.*math.pi/2.
+        self.panel2_angle_nom = -math.pi/3.
                 
         # State + action bounds
         # state: xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho
@@ -111,9 +111,10 @@ class GraspEnv(gym.Env):
         # -- simple cost terms
         self.simple_dist_cost = 0.1
         self.simple_angle_cost = 0.1
+        self.simple_vel_cost = 0.2
         self.simple_f1_cost = 0.5
         self.simple_f2_cost = 0.5
-        self.simple_m_cost = 0.5
+        self.simple_m_cost = 0.7
         # --
 
         # I think this is from CM-gripper to CM-object
@@ -132,7 +133,8 @@ class GraspEnv(gym.Env):
         #     limit surface
         self.goal_eps_norm = 0.5
         self.goal_eps_tan = 1.0
-        self.goal_eps_ang = math.pi
+        self.goal_eps_ang = math.pi/4.
+        self.goal_eps_vel = 0.5
         
         high_ob = [self.x_upper,
                    self.y_upper,
@@ -204,10 +206,10 @@ class GraspEnv(gym.Env):
 
         z[6] = np.random.uniform(2,5)
         z[7] = np.random.uniform(2,5)
-        z[8] = 0
+        z[8] = 0 # doesn't matter
         z[9] = np.random.uniform(-0.1,0.1)
         z[10] = np.random.uniform(-0.1,0.1)
-        z[11] = 0 #np.random.uniform(-0.1,0.1)
+        z[11] = 0 # doesn't matter
 
         # # keep moving object until they're not on top of each other
         # while np.sqrt((z[6]-z[0])**2 + (z[7]-z[1])**2) < 1.2*(self.ro+self.rs):
