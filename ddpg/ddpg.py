@@ -263,7 +263,7 @@ def build_scores():
 #   Agent Training
 # ===========================
 
-def train(sess, env, args, actor, critic, actor_noise):
+def train(sess, env, args, actor, critic):
 
     # Set up summary Ops
     summary_ops, summary_vars = build_summaries()
@@ -284,12 +284,18 @@ def train(sess, env, args, actor, critic, actor_noise):
     # in other environments.
     # tflearn.is_training(True)
 
+    sig = 0.3
+
     for i in range(int(args['max_episodes'])):
 
         s = env.reset()
 
         ep_reward = 0
         ep_ave_max_q = 0
+
+        actor_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(env.action_space.shape[0]), sigma=sig)
+        if i > 1000:
+            sig = 0.999*sig
 
         for j in range(1,int(args['max_episode_len'])):
 
@@ -423,7 +429,7 @@ def main(args):
                                float(args['gamma']),
                                actor.get_num_trainable_vars())
         
-        actor_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(action_dim))
+        # actor_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(action_dim))
 
         if args['use_gym_monitor']:
             if not args['render_env']:
@@ -432,7 +438,7 @@ def main(args):
             else:
                 env = wrappers.Monitor(env, args['monitor_dir'], force=True)
 
-        train(sess, env, args, actor, critic, actor_noise)
+        train(sess, env, args, actor, critic) #, actor_noise)
 
         print('~~~~~~~~~~ training is over ~~~~~~~~~~')
 
@@ -455,7 +461,7 @@ if __name__ == '__main__':
     # run parameters
     parser.add_argument('--env', help='choose the gym env- tested on {Pendulum-v0}', default='Pendulum-v0')
     parser.add_argument('--random-seed', help='random seed for repeatability', default=1234)
-    parser.add_argument('--max-episodes', help='max num of episodes to do while training', default=5000)
+    parser.add_argument('--max-episodes', help='max num of episodes to do while training', default=100000)
     parser.add_argument('--test-episodes', help='num episodes while testing', default = 100)
     parser.add_argument('--max-episode-len', help='max length of 1 episode', default=200)
     parser.add_argument('--render-env', help='render the gym env', action='store_true')
