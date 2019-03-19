@@ -1,5 +1,6 @@
 """
 Free-flyer Gripper Grasping. For model-free RL learning of trajectory to grasp an object.
+*0*o798gaWoJ
 
 """
 
@@ -252,16 +253,20 @@ class GraspEnv(gym.Env):
         angle_to_gripper = soft_abs(ths - np.arctan2(yo-ys,xo-xs), 1.0)
 
         # TODO: add distance for force limit surface (e.g. velocity limits)
-        return (norm_dist_to_object, tan_dist_to_object, angle_to_gripper)
+        vel = np.sqrt(vxs**2 + vys**2)
+        
+        return (norm_dist_to_object, tan_dist_to_object, angle_to_gripper, vel)
 
     def simple_cost(self,s,a):
         xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = s
         f1, f2, m = a
-        
-        dist_to_object = np.sqrt((xo-xs)**2 + (yo-ys)**2)
-        dist_pen = self.simple_dist_cost * soft_abs(dist_to_object)
 
-        angle_to_gripper = soft_abs(ths - np.arctan2(yo-ys,xo-xs), 1.0)
+        (norm_dist_to_object, tan_dist_to_object, angle_to_gripper, vel_mag) = self._goal_dist(s)
+
+        dist_pen = self.simple_dist_cost * norm_dist_to_object + self.simple_dist_cost * tan_dist_to_object
+
+        vel_pen = self.simple_vel_cost*vel_mag
+
         ang_pen = self.simple_angle_cost * angle_to_gripper
 
         f1_pen = self.simple_f1_cost * soft_abs(f1)
@@ -270,7 +275,7 @@ class GraspEnv(gym.Env):
 
         # TODO: add cost for being at the goal position but going too fast...
         
-        return dist_pen + ang_pen + f1_pen + f2_pen + m_pen
+        return float(dist_pen + ang_pen + f1_pen + f2_pen + m_pen + vel_pen)
     
     def x_dot(self,z,u):
         xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = z
@@ -297,6 +302,16 @@ class GraspEnv(gym.Env):
         return [xs_d, ys_d, ths_d, vxs_d, vys_d, vths_d, 
                 xo_d, yo_d, tho_d, vxo_d, vyo_d, vtho_d]
 
+    def clip_state(self, s):
+        xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = z
+
+        z[0] = np.clip(xs, self.x_lower, self.x_upper)
+        z[1] = np.clip(ys, self.y_lower, self.y_upper)
+        z[2] = np.clip(ths, -self.angle_limit, self.angle_limit)
+        z[3] = np.clip(vxs, -self.v_limit, self.v_limit)
+        z[4] = np.clip(vys, -self.v_limit, self.v_limit)
+        z[5] = np.clip(vths, -self.angle_deriv_limit, self.angle_deriv_limit)
+        # don't need to clip object for now
         
     def forward_dynamics(self,x,u):
         clipped_thrust = np.clip(u[:2],-self.f_upper,self.f_upper)
@@ -315,6 +330,10 @@ class GraspEnv(gym.Env):
 
         x_tp1 = odeint(integrand, old_state, t)
         updated_state = x_tp1[-1,:]
+
+        # make sure theta is in range [-pi, pi]
+        updated_state[2] = ( updated_state[2] + np.pi) % (2 * np.pi ) - np.pi
+        
         return updated_state
     
     def step(self, action):
@@ -329,10 +348,12 @@ class GraspEnv(gym.Env):
         reward = -1* self.simple_cost(old_state,action)
         
         done = False
-        norm_dist, tan_dist, angle = self._goal_dist(old_state)
-        if (soft_abs(norm_dist) <= self.goal_eps_norm and
-            soft_abs(tan_dist)  <= self.goal_eps_tan):# and
-            #angle     <= self.goal_eps_ang):
+        norm_dist, tan_dist, angle, vel = self._goal_dist(old_state)
+        if (norm_dist <= self.goal_eps_norm and
+            tan_dist  <= self.goal_eps_tan): # and
+            # angle     <= self.goal_eps_ang and
+            # vel       <= self.goal_eps_vel):
+            print('angle: {:f}'.format(angle))
             done = True
             reward += 100.
 
