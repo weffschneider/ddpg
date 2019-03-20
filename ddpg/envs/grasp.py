@@ -102,7 +102,7 @@ class GraspEnv(gym.Env):
         self.y_lower = self.x_lower
         
         self.v_limit = 0.5 #vel limit for all directions
-        self.angle_limit = math.pi/4.
+        self.angle_limit = math.pi.
         self.angle_deriv_limit = math.pi/16.
         
         self.f_upper = 5.               # Aerojet Rocketdyne MR-111
@@ -126,16 +126,12 @@ class GraspEnv(gym.Env):
         self.start_state[0] = -5.
         self.start_state[6] = 5.
 
-        # define goal region
-        # TODO: this should use the force limit surface from ICRA paper
-        # if (outside of gripper range)
-        #     nope
-        # if (inside gripper range, close enough to gripper)
-        #     limit surface
+        # define goal region, based on grasping envelope from ICRA 2016 paper
         self.goal_eps_norm = 0.5
         self.goal_eps_tan = 1.0
         self.goal_eps_ang = math.pi/4.
         self.goal_eps_vel = 0.5
+        # TODO: add angular velocity
         
         high_ob = [self.x_upper,
                    self.y_upper,
