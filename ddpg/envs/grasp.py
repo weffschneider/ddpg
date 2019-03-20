@@ -254,7 +254,6 @@ class GraspEnv(gym.Env):
 
         # TODO: add distance for force limit surface (e.g. velocity limits)
         vel = np.sqrt(vxs**2 + vys**2)
-        
         return (norm_dist_to_object, tan_dist_to_object, angle_to_gripper, vel)
 
     def simple_cost(self,s,a):

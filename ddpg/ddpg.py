@@ -263,7 +263,7 @@ def build_scores():
 #   Agent Training
 # ===========================
 
-def train(sess, env, args, actor, critic):
+def train(sess, env, args, actor, critic, actor_noise):
 
     # Set up summary Ops
     summary_ops, summary_vars = build_summaries()
@@ -278,24 +278,12 @@ def train(sess, env, args, actor, critic):
     # Initialize replay memory
     replay_buffer = ReplayBuffer(int(args['buffer_size']), int(args['random_seed']))
 
-    # ********************** do this???? *********************
-    # Needed to enable BatchNorm. 
-    # This hurts the performance on Pendulum but could be useful
-    # in other environments.
-    # tflearn.is_training(True)
-
-    sig = 0.3
-
     for i in range(int(args['max_episodes'])):
 
         s = env.reset()
 
         ep_reward = 0
         ep_ave_max_q = 0
-
-        actor_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(env.action_space.shape[0]), sigma=sig)
-        if i > 1000:
-            sig = 0.999*sig
 
         for j in range(1,int(args['max_episode_len'])):
 
@@ -304,7 +292,7 @@ def train(sess, env, args, actor, critic):
 
             # Added exploration noise
             #a = actor.predict(np.reshape(s, (1, 3))) + (1. / (1. + i))
-            a = actor.predict(np.reshape(s, (1, actor.s_dim))) + actor_noise()
+            a = actor.predict(np.reshape(s, (1, actor.s_dim))) + actor_noise()/((i+99)/100.)
 
             s2, r, terminal, info = env.step(a[0])
 
@@ -347,18 +335,17 @@ def train(sess, env, args, actor, critic):
             ep_reward += r
 
             if terminal:
-
-                summary_str = sess.run(summary_ops, feed_dict={
-                    summary_vars[0]: ep_reward,
-                    summary_vars[1]: ep_ave_max_q / float(j)
-                })
-
-                writer.add_summary(summary_str, i)
-                writer.flush()
-
-                print('TRAIN | Reward: {:d} | Episode: {:d} | Qmax: {:.4f}'.format(int(ep_reward), \
-                        i, (ep_ave_max_q / float(j))))
+                print('TRAIN | Reward: {:d} | Episode: {:d} | Qmax: {:.4f}'.format(int(ep_reward), i, (ep_ave_max_q / float(j))))
                 break
+
+        summary_str = sess.run(summary_ops, feed_dict={
+            summary_vars[0]: ep_reward,
+            summary_vars[1]: ep_ave_max_q / float(j)
+        })
+        writer.add_summary(summary_str, i)
+        writer.flush()
+
+    writer.close()
 
 def test(sess, env, args, actor):
 
@@ -429,7 +416,7 @@ def main(args):
                                float(args['gamma']),
                                actor.get_num_trainable_vars())
         
-        # actor_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(action_dim))
+        actor_noise = OrnsteinUhlenbeckActionNoise(mu=np.zeros(action_dim))
 
         if args['use_gym_monitor']:
             if not args['render_env']:
@@ -438,7 +425,7 @@ def main(args):
             else:
                 env = wrappers.Monitor(env, args['monitor_dir'], force=True)
 
-        train(sess, env, args, actor, critic) #, actor_noise)
+        train(sess, env, args, actor, critic, actor_noise)
 
         print('~~~~~~~~~~ training is over ~~~~~~~~~~')
 
@@ -461,7 +448,7 @@ if __name__ == '__main__':
     # run parameters
     parser.add_argument('--env', help='choose the gym env- tested on {Pendulum-v0}', default='Pendulum-v0')
     parser.add_argument('--random-seed', help='random seed for repeatability', default=1234)
-    parser.add_argument('--max-episodes', help='max num of episodes to do while training', default=100000)
+    parser.add_argument('--max-episodes', help='max num of episodes to do while training', default=4000)
     parser.add_argument('--test-episodes', help='num episodes while testing', default = 100)
     parser.add_argument('--max-episode-len', help='max length of 1 episode', default=200)
     parser.add_argument('--render-env', help='render the gym env', action='store_true')
@@ -472,7 +459,7 @@ if __name__ == '__main__':
     parser.add_argument('--test-dir', help='directory for storing test info', default='./results/tf_ddpg_test')
 
     parser.set_defaults(render_env=False)
-    parser.set_defaults(render_test=True)
+    parser.set_defaults(render_test=False)
     parser.set_defaults(use_gym_monitor=False) #True)
     
     args = vars(parser.parse_args())
