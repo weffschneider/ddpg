@@ -278,12 +278,20 @@ def train(sess, env, args, actor, critic, actor_noise):
     # Initialize replay memory
     replay_buffer = ReplayBuffer(int(args['buffer_size']), int(args['random_seed']))
 
+    # ********************** do this???? *********************
+    # Needed to enable BatchNorm. 
+    # This hurts the performance on Pendulum but could be useful
+    # in other environments.
+    # tflearn.is_training(True)
+
     for i in range(int(args['max_episodes'])):
 
         s = env.reset()
 
         ep_reward = 0
         ep_ave_max_q = 0
+
+        epsilon = -0.0511192 * np.log(0.0002075*i) # decaying epsilon
 
         for j in range(1,int(args['max_episode_len'])):
 
@@ -292,7 +300,10 @@ def train(sess, env, args, actor, critic, actor_noise):
 
             # Added exploration noise
             #a = actor.predict(np.reshape(s, (1, 3))) + (1. / (1. + i))
-            a = actor.predict(np.reshape(s, (1, actor.s_dim))) + actor_noise()/((i+99)/100.)
+            a = actor.predict(np.reshape(s, (1, actor.s_dim))) + actor_noise()/((i+9)/10.)
+
+            if np.random.random() < epsilon:
+                a = [env.action_space.sample()]
 
             s2, r, terminal, info = env.step(a[0])
 
@@ -448,7 +459,7 @@ if __name__ == '__main__':
     # run parameters
     parser.add_argument('--env', help='choose the gym env- tested on {Pendulum-v0}', default='Pendulum-v0')
     parser.add_argument('--random-seed', help='random seed for repeatability', default=1234)
-    parser.add_argument('--max-episodes', help='max num of episodes to do while training', default=4000)
+    parser.add_argument('--max-episodes', help='max num of episodes to do while training', default=5000)
     parser.add_argument('--test-episodes', help='num episodes while testing', default = 100)
     parser.add_argument('--max-episode-len', help='max length of 1 episode', default=200)
     parser.add_argument('--render-env', help='render the gym env', action='store_true')
