@@ -300,7 +300,7 @@ def train(sess, env, args, actor, critic, actor_noise):
 
             # Added exploration noise
             #a = actor.predict(np.reshape(s, (1, 3))) + (1. / (1. + i))
-            a = actor.predict(np.reshape(s, (1, actor.s_dim))) + actor_noise()/((i+9)/10.)
+            a = actor.predict(np.reshape(s, (1, actor.s_dim))) + actor_noise()/((i+99)/100.)
 
             if np.random.random() < epsilon:
                 a = [env.action_space.sample()]
