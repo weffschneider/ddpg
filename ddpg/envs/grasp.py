@@ -89,10 +89,10 @@ class GraspEnv(gym.Env):
 
         # Randomization limits
         self.panel1_len_nom = 5.
-        self.panel1_angle_nom = math.pi/3.
+        self.panel1_angle_nom = 2*math.pi/3.
         
         self.panel2_len_nom = 5.
-        self.panel2_angle_nom = -math.pi/3.
+        self.panel2_angle_nom = -2*math.pi/3.
                 
         # State + action bounds
         # state: xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho
@@ -102,7 +102,7 @@ class GraspEnv(gym.Env):
         self.y_lower = self.x_lower
         
         self.v_limit = 0.5 #vel limit for all directions
-        self.angle_limit = math.pi.
+        self.angle_limit = math.pi
         self.angle_deriv_limit = math.pi/16.
         
         self.f_upper = 5.               # Aerojet Rocketdyne MR-111
@@ -112,6 +112,7 @@ class GraspEnv(gym.Env):
         # -- simple cost terms
         self.simple_dist_cost = 0.1
         self.simple_angle_cost = 0.1
+        self.simple_ang_vel_cost = 0.05
         self.simple_vel_cost = 0.2
         self.simple_f1_cost = 0.5
         self.simple_f2_cost = 0.5
@@ -127,11 +128,12 @@ class GraspEnv(gym.Env):
         self.start_state[6] = 5.
 
         # define goal region, based on grasping envelope from ICRA 2016 paper
-        self.goal_eps_norm = 0.5
-        self.goal_eps_tan = 1.0
+        self.goal_eps_norm = 0.2 # contact
+        self.goal_eps_tan = 0.1 # offset
         self.goal_eps_ang = math.pi/4.
-        self.goal_eps_vel = 0.5
-        # TODO: add angular velocity
+        self.goal_eps_vel_lower = 0.2
+        self.goal_eps_vel_upper = 0.8
+        self.goal_eps_ang_vel = math.pi
         
         high_ob = [self.x_upper,
                    self.y_upper,
@@ -247,30 +249,31 @@ class GraspEnv(gym.Env):
         norm_dist_to_object = soft_abs(np.dot(s2o,xs_hat) - (self.ro+self.rs), 1.0)
         tan_dist_to_object = soft_abs(np.dot(s2o,ys_hat), 1.0)
         angle_to_gripper = soft_abs(ths - np.arctan2(yo-ys,xo-xs), 1.0)
+        ang_vel = soft_abs(vtho - vths)
 
-        # TODO: add distance for force limit surface (e.g. velocity limits)
         vel = np.sqrt(vxs**2 + vys**2)
-        return (norm_dist_to_object, tan_dist_to_object, angle_to_gripper, vel)
+        return (norm_dist_to_object, tan_dist_to_object, angle_to_gripper, vel, ang_vel)
 
     def simple_cost(self,s,a):
         xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = s
         f1, f2, m = a
 
-        (norm_dist_to_object, tan_dist_to_object, angle_to_gripper, vel_mag) = self._goal_dist(s)
+        (norm_dist_to_object, tan_dist_to_object, angle_to_gripper, vel_mag, ang_vel) = self._goal_dist(s)
 
         dist_pen = self.simple_dist_cost * norm_dist_to_object + self.simple_dist_cost * tan_dist_to_object
 
         vel_pen = self.simple_vel_cost*vel_mag
 
         ang_pen = self.simple_angle_cost * angle_to_gripper
+        angvel_pen = self.simple_ang_vel_cost * ang_vel
 
         f1_pen = self.simple_f1_cost * soft_abs(f1)
         f2_pen = self.simple_f2_cost * soft_abs(f2)
         m_pen = self.simple_m_cost * soft_abs(m)
 
-        # TODO: add cost for being at the goal position but going too fast...
+        # TODO: add cost angular velocity
         
-        return float(dist_pen + ang_pen + f1_pen + f2_pen + m_pen + vel_pen)
+        return float(dist_pen + ang_pen + f1_pen + f2_pen + m_pen + vel_pen + angvel_pen)
     
     def x_dot(self,z,u):
         xs, ys, ths, vxs, vys, vths, xo, yo, tho, vxo, vyo, vtho = z
@@ -343,12 +346,15 @@ class GraspEnv(gym.Env):
         reward = -1* self.simple_cost(old_state,action)
         
         done = False
-        norm_dist, tan_dist, angle, vel = self._goal_dist(old_state)
+        norm_dist, tan_dist, angle, vel, ang_vel = self._goal_dist(old_state)
+        # TODO: consider the dependencies between these, instead of having
+        # separate limits
         if (norm_dist <= self.goal_eps_norm and
-            tan_dist  <= self.goal_eps_tan): # and
-            # angle     <= self.goal_eps_ang and
-            # vel       <= self.goal_eps_vel):
-            print('angle: {:f}'.format(angle))
+            tan_dist  <= self.goal_eps_tan and
+            angle     <= self.goal_eps_ang and
+            vel       >= self.goal_eps_vel_lower and
+            vel       <= self.goal_eps_vel_upper and
+            ang_vel   <= self.goal_eps_ang_vel):
             done = True
             reward += 100.
 

@@ -284,7 +284,7 @@ def train(sess, env, args, actor, critic, actor_noise):
     # in other environments.
     # tflearn.is_training(True)
 
-    for i in range(int(args['max_episodes'])):
+    for i in range(1,int(args['max_episodes'])+1):
 
         s = env.reset()
 
